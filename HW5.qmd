@@ -1,0 +1,374 @@
+---
+title: "ST558 HW5: Non-Linear"
+format: html
+editor: visual
+---
+
+# Document Details
+
+#### Author: *Smit Miyani*
+
+#### Collaborators: *N/A*
+
+#### Assignment: *HW5*
+
+#### Date: *15JUl24*
+
+#### Purpose
+
+*General practice in modelling data.*
+
+# Tasks
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = TRUE, warning = TRUE)
+
+#Remove Warnings
+```
+
+## Task 1: Conceptual Questions
+
+1.  What is the purpose of using cross-validation when fitting a random forest model??
+
+    > The purpose of using cross-validation when fitting a RF model is to evaluate how well the model performs on unseen data multiple times. By splitting the data into several parts and training the model multiple times, each time using a different part for validation, we can get a more accurate measure of the model's performance and reduce the risk of overfitting.
+
+2.  Describe the bagged tree algorithm.
+
+    > The bagged tree algorithm involves creating multiple decision trees using different random subsets of the training data. Each tree is trained independently, and the final prediction is made by averaging/taking majority of the predictions of all the trees, which helps to improve the model's accuracy and stability by reducing variance.
+
+3.  What is meant by a general linear model?
+
+    > A general linear model is a statistical model that describes the relationship between a dependent variable and one or more independent variables using a linear equation. It can be used to predict outcomes and understand relationships between variables.
+
+4.  When fitting a multiple linear regression model, what does adding an interaction term do? That is, what does it allow the model to do differently as compared to when it is not included in the model?
+
+    > Adding an interaction term in a MLR model allows the model to account for the combined effect of two or more variables on the dependent variable. This means the model can analyze situations where the effect of one variable on the response depends on the level of another variable, providing a more complex understanding of the relationships between variables.
+
+5.  Why do we split our data into a training and test set?
+
+    > We split our data into a training and test set to check how well our model performs on new, unseen data. The training set is used to create and train the model, while the test set is used to evaluate its prediction performance. This helps to ensure that the model generalizes well and is not just memorizing the training data.
+
+## Task 2: Fitting Models
+
+Loading required modelling and summarizing packages and reading `heart.csv`:
+
+```{r}
+library(tidyverse)
+library(caret)
+
+heart_data<- read_csv("https://www4.stat.ncsu.edu/~online/datasets/heart.csv")
+```
+
+### Quick EDA/Data Preparation
+
+#### Question 1: Summarizing `heart_data`
+
+Looking at the structure of data using str().
+
+```{r}
+str(heart_data)
+
+```
+
+Summary of data using `summary()`
+
+```{r}
+summary(heart_data)
+```
+
+Looking for missing data:
+
+```{r}
+#Missing values in each column
+colSums(is.na(heart_data))
+
+```
+
+#### Question 2: Removing the `ST_Slope` column and converting `HeartDisease` to factor
+
+Removing the `ST_Slope` column as instructed using `select()` and converting `HeartDisease` and other categorical variables to factor type with `as.factor()` within `mutate()`
+
+```{r}
+heart_data <- heart_data |>
+  select(-ST_Slope) |>
+  mutate(
+    HeartDisease = as.factor(HeartDisease),
+    Sex = as.factor(Sex),
+    ChestPainType= as.factor(ChestPainType),
+    ExerciseAngina = as.factor(ExerciseAngina),
+    RestingECG = as.factor(RestingECG))
+head(heart_data)
+```
+
+#### Question 3: Creating Dummy Variables for categorical variables
+
+Creating dummy variables using `dummyVars()`. Then creating dummy df `heart_cat` using `predict()`.
+
+```{r}
+dummies <- dummyVars(data = heart_data,
+                     formula = ~Sex +
+ExerciseAngina + ChestPainType + RestingECG)
+heart_cat <- predict(dummies, newdata = heart_data)
+heart_cat <- as.data.frame(heart_cat)
+heart_cat
+```
+
+Combining the dummy dataframe `heart_cat` with `heart_data` using `bind_cols()` .
+
+```{r}
+heart_combined <- bind_cols(
+  heart_data |>
+    #Ommitting original categorical variables
+    select(-c(Sex,ChestPainType,RestingECG,ExerciseAngina)), 
+  heart_cat)
+
+#Preview
+head(heart_combined)
+```
+
+### Split Your Data
+
+Creating a test-train split using `createDataPartition()` from `caret`.
+
+```{r}
+set.seed(333)
+split <- createDataPartition(y = heart_combined$HeartDisease, 
+                             p = 0.8, 
+                             list = FALSE)
+train <- heart_combined[split, ]
+test <- heart_combined[-split, ]
+
+#Check size
+dim(train) ; dim(test);
+anyNA(heart_combined); #final check for NULL values
+```
+
+### kNN
+
+Setting up the KNN model for predicting heart disease, Starting by defining 10-fold cross-validation with 3 repeats in `trctrl.` Then creating a `Grid` of k-values from 1 to 40 for the search. Then, using the `train` function, fitting the KNN model with `method = "knn"` to the training data, centering and scaling it, and performing a grid search to find the optimal "k" that minimizes prediction error.
+
+```{r}
+#Defining CrossVal criteria
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+# Defining a tuning grid for a knn model
+Grid <- expand.grid(k = seq(1, 40))
+
+# Training the model using knn method
+knn_fit <- train(HeartDisease ~., data = train, method = "knn",
+ trControl=trctrl,
+ preProcess = c("center", "scale"),
+ tuneLength = 10,
+ tuneGrid = Grid)
+```
+
+```{r}
+#model details to review the results and optimal parameters
+knn_fit
+```
+
+Evaluating the model performance on test set by getting predictions from the trained and tuned `knn_fit` and the true responses `test$HeartDisease` and then calling it inside `confusionMatrix()` which yeilds the necessary stats.
+
+```{r}
+#Predictions
+predictions <- predict(knn_fit,newdata = test)
+
+#Metrics
+confusionMatrix(predictions,test$HeartDisease)
+```
+
+### Logistic Regression Models
+
+#### Model 1: All Variables, No Interaction
+
+Selecting *ALL* variables to train `logreg_fit1` model with same CV parameter `trctrl` using `method= "glm"`. This sets up the first logistic regression model.
+
+```{r}
+# Training the model using glm method
+logreg_fit1 <- train(HeartDisease ~., data = train, method = "glm",
+ trControl=trctrl,
+ preProcess = c("center", "scale"),
+ tuneLength = 10
+ )
+```
+
+```{r}
+#Model Details
+logreg_fit1
+```
+
+Evaluating `logreg_fit1` model performance
+
+```{r}
+#predictions
+pred_lr1 <- predict(logreg_fit1,newdata = test)
+
+#metrics
+confusionMatrix(pred_lr1,test$HeartDisease)
+```
+
+#### Model 2: Numeric Predictors
+
+Selecting *Numeric* variables to train `logreg_fit2` model with same CV parameter `trctrl` using `method= "glm"`. This sets up the second logistic regression model.
+
+```{r}
+# Training the model using glm method with all numeric
+logreg_fit2 <- train(HeartDisease ~.,
+                     data = train |>
+                       select(c(Age, RestingBP, Cholesterol,   FastingBS,MaxHR,Oldpeak),HeartDisease),
+                     method = "glm",
+ trControl=trctrl,
+ preProcess = c("center", "scale"),
+ tuneLength = 10
+ )
+```
+
+```{r}
+#Model Details
+logreg_fit2
+```
+
+Evaluating `logreg_fit2` model performance
+
+```{r}
+#predictions
+pred_lr2 <- predict(logreg_fit2,newdata = test)
+
+#metrics
+confusionMatrix(pred_lr2,test$HeartDisease)
+```
+
+#### Model 3: Categorical Predictors Only
+
+Selecting *Categorical* variables to train `logreg_fit3` model with same CV parameter `trctrl` using `method= "glm"`. This sets up the second logistic regression model.
+
+```{r}
+# Training the model using glm method with all categorical data
+logreg_fit3 <- train(HeartDisease ~.,
+                     data = train |>
+                       select(-c(Age, RestingBP, Cholesterol,   FastingBS,MaxHR,Oldpeak)),
+                     method = "glm",
+ trControl=trctrl,
+ tuneLength = 10
+ )
+```
+
+```{r}
+#Model details
+logreg_fit3
+```
+
+Evaluating `logreg_fit3` model performance
+
+```{r}
+#Predictions
+pred_lr3 <- predict(logreg_fit3,newdata = test)
+
+#Metrics
+confusionMatrix(pred_lr3,test$HeartDisease)
+```
+
+#### Best Model Summary(Best LogReg Model)
+
+Based on the accuracy metrics, the best model is `logreg_fit1` with accuracy of 0.8415 on the test set. This model takes in *ALL* the independent variables from the dataset to form predictions. Yielding the model summary using `summary()` from base R.
+
+```{r}
+summary(logreg_fit1)
+```
+
+### Tree Based Models
+
+*Using ALL variables from the dataset to train Tree Based Models* .
+
+#### Tree Classifier Model
+
+Setting up the first tree based model for predicting heart disease, First using CV criteria as defined in `trctrl.` Then creating `tree_grid1` associated with `method = "rpart"` for parameter tuning, Using `train()` to train the model with a grid search to find the optimal parameters that minimizes prediction error
+
+```{r}
+# Defining a tuning grid for a rpart model
+tree_grid1 <- expand.grid(cp = seq(0, 0.1, by = 0.001))
+
+# Training the model using rpart method
+tree_fit1 <- train(HeartDisease ~., data = train, method = "rpart",
+                   trControl = trctrl,
+                   preProcess = c("center", "scale"),
+                   tuneGrid = tree_grid1)
+
+# Model Details
+tree_fit1
+
+
+```
+
+Evaluating `tree_fit1` model performance
+
+```{r}
+#predictions
+pred_tree1 <- predict(tree_fit1,newdata = test)
+
+#metrics
+confusionMatrix(pred_tree1,test$HeartDisease)
+```
+
+#### Random Forest Model
+
+Setting up the second tree based model using CV criteria as defined in `trctrl.` with `tree_grid2` associated with `method = "rf"` for parameter tuning, Using `train()` to train and fit the model with a grid search.
+
+```{r}
+# Defining a tuning grid for a tree-based model
+tree_grid2 <- expand.grid(mtry = seq(1, length(colnames(train))-1))
+
+# Training the model using random forest method
+tree_fit2 <- train(HeartDisease ~., data = train, method = "rf",
+                   trControl = trctrl,
+                   preProcess = c("center", "scale"),
+                   tuneGrid = tree_grid2)
+
+# Model Details
+tree_fit2
+```
+
+Evaluating `tree_fit2` model performance
+
+```{r}
+#predictions
+pred_tree2 <- predict(tree_fit2,newdata = test)
+
+#metrics
+confusionMatrix(pred_tree2,test$HeartDisease)
+```
+
+#### Boosted Tree Model
+
+Setting up the third tree based model using CV criteria as defined in `trctrl.` with `tree_grid3` associated with `method = "gbm"` for parameter tuning, Using `train()` to train and fit the model with a grid search.
+
+```{r}
+# Defining a tuning grid for a tree-based model
+tree_grid3 <- expand.grid(n.trees= c( 25, 50, 100, 200),
+                          interaction.depth = c(1, 2, 3),
+                          shrinkage = 0.1,
+                          n.minobsinnode = 10)
+
+# Training the model using boosted tree method
+tree_fit3 <- train(HeartDisease ~., data = train, method = "gbm",
+                   trControl = trctrl,
+                   preProcess = c("center", "scale"),
+                   tuneGrid = tree_grid3)
+
+# Model Details
+tree_fit3
+```
+
+Evaluating `tree_fit3` model performance
+
+```{r}
+#Predictions
+pred_tree3 <- predict(tree_fit3,newdata = test)
+
+#Metrics
+confusionMatrix(pred_tree3,test$HeartDisease)
+```
+
+### Wrap Up
+
+The best model performance on test set based on accuracy = 0.847 is observed in two models `knn_fit` (KNN Model) and `tree_fit2` (Random Forest Model).
