@@ -21,7 +21,7 @@ editor: visual
 # Tasks
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(message = TRUE, warning = TRUE)
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 
 #Remove Warnings
 ```
@@ -110,7 +110,7 @@ dummies <- dummyVars(data = heart_data,
 ExerciseAngina + ChestPainType + RestingECG)
 heart_cat <- predict(dummies, newdata = heart_data)
 heart_cat <- as.data.frame(heart_cat)
-heart_cat
+head(heart_cat)
 ```
 
 Combining the dummy dataframe `heart_cat` with `heart_data` using `bind_cols()` .
